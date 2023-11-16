@@ -166,8 +166,8 @@ namespace WinSW
             : base(logDirectory, baseName, outFileDisabled, errFileDisabled, outFilePattern, errFilePattern)
         {
             this.FileMode = fileMode;
-            this.OutputLogFileName = this.BaseLogFileName + ".out.log";
-            this.ErrorLogFileName = this.BaseLogFileName + ".err.log";
+            this.OutputLogFileName = this.BaseLogFileName + this.OutFilePattern;
+            this.ErrorLogFileName = this.BaseLogFileName + this.ErrFilePattern;
         }
 
         protected override Task LogOutput(StreamReader outputReader)
