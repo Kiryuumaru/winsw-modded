@@ -264,9 +264,13 @@ namespace WinSW
 
         public override bool ErrFileDisabled => this.SingleBoolElementOrDefault("errfiledisabled", base.ErrFileDisabled);
 
+        public override bool CombinedFileDisabled => this.SingleBoolElementOrDefault("combinedfiledisabled", base.CombinedFileDisabled);
+
         public override string OutFilePattern => this.SingleElementOrNull("outfilepattern") ?? base.OutFilePattern;
 
         public override string ErrFilePattern => this.SingleElementOrNull("errfilepattern") ?? base.ErrFilePattern;
+
+        public override string CombinedFilePattern => this.SingleElementOrNull("combinedfilepattern") ?? base.CombinedFilePattern;
 
         public LogHandler LogHandler
         {
@@ -281,16 +285,16 @@ namespace WinSW
                 switch (this.LogMode)
                 {
                     case "rotate":
-                        return new SizeBasedRollingLogAppender(this.LogDirectory, this.LogName, this.OutFileDisabled, this.ErrFileDisabled, this.OutFilePattern, this.ErrFilePattern);
+                        return new SizeBasedRollingLogAppender(this.LogDirectory, this.LogName, this.OutFileDisabled, this.ErrFileDisabled, this.CombinedFileDisabled, this.OutFilePattern, this.ErrFilePattern, this.CombinedFilePattern);
 
                     case "none":
                         return new IgnoreLogAppender();
 
                     case "reset":
-                        return new ResetLogAppender(this.LogDirectory, this.LogName, this.OutFileDisabled, this.ErrFileDisabled, this.OutFilePattern, this.ErrFilePattern);
+                        return new ResetLogAppender(this.LogDirectory, this.LogName, this.OutFileDisabled, this.ErrFileDisabled, this.CombinedFileDisabled, this.OutFilePattern, this.ErrFilePattern, this.CombinedFilePattern);
 
                     case "roll":
-                        return new RollingLogAppender(this.LogDirectory, this.LogName, this.OutFileDisabled, this.ErrFileDisabled, this.OutFilePattern, this.ErrFilePattern);
+                        return new RollingLogAppender(this.LogDirectory, this.LogName, this.OutFileDisabled, this.ErrFileDisabled, this.CombinedFileDisabled, this.OutFilePattern, this.ErrFilePattern, this.CombinedFilePattern);
 
                     case "roll-by-time":
                         var patternNode = e.SelectSingleNode("pattern");
@@ -301,15 +305,15 @@ namespace WinSW
 
                         string? pattern = patternNode.InnerText;
                         int period = SingleIntElement(e, "period", 1);
-                        return new TimeBasedRollingLogAppender(this.LogDirectory, this.LogName, this.OutFileDisabled, this.ErrFileDisabled, this.OutFilePattern, this.ErrFilePattern, pattern, period);
+                        return new TimeBasedRollingLogAppender(this.LogDirectory, this.LogName, this.OutFileDisabled, this.ErrFileDisabled, this.CombinedFileDisabled, this.OutFilePattern, this.ErrFilePattern, this.CombinedFilePattern, pattern, period);
 
                     case "roll-by-size":
                         sizeThreshold = SingleIntElement(e, "sizeThreshold", 10 * 1024) * SizeBasedRollingLogAppender.BytesPerKB;
                         int keepFiles = SingleIntElement(e, "keepFiles", SizeBasedRollingLogAppender.DefaultFilesToKeep);
-                        return new SizeBasedRollingLogAppender(this.LogDirectory, this.LogName, this.OutFileDisabled, this.ErrFileDisabled, this.OutFilePattern, this.ErrFilePattern, sizeThreshold, keepFiles);
+                        return new SizeBasedRollingLogAppender(this.LogDirectory, this.LogName, this.OutFileDisabled, this.ErrFileDisabled, this.CombinedFileDisabled, this.OutFilePattern, this.ErrFilePattern, this.CombinedFilePattern, sizeThreshold, keepFiles);
 
                     case "append":
-                        return new DefaultLogAppender(this.LogDirectory, this.LogName, this.OutFileDisabled, this.ErrFileDisabled, this.OutFilePattern, this.ErrFilePattern);
+                        return new DefaultLogAppender(this.LogDirectory, this.LogName, this.OutFileDisabled, this.ErrFileDisabled, this.CombinedFileDisabled, this.OutFilePattern, this.ErrFilePattern, this.CombinedFilePattern);
 
                     case "roll-by-size-time":
                         sizeThreshold = SingleIntElement(e, "sizeThreshold", 10 * 1024) * RollingSizeTimeLogAppender.BytesPerKB;
@@ -348,7 +352,7 @@ namespace WinSW
                         var zipdateformatNode = e.SelectSingleNode("zipDateFormat");
                         string zipdateformat = zipdateformatNode is null ? "yyyyMM" : zipdateformatNode.InnerText;
 
-                        return new RollingSizeTimeLogAppender(this.LogDirectory, this.LogName, this.OutFileDisabled, this.ErrFileDisabled, this.OutFilePattern, this.ErrFilePattern, sizeThreshold, filePatternNode.InnerText, autoRollAtTime, zipolderthannumdays, zipdateformat);
+                        return new RollingSizeTimeLogAppender(this.LogDirectory, this.LogName, this.OutFileDisabled, this.ErrFileDisabled, this.CombinedFileDisabled, this.OutFilePattern, this.ErrFilePattern, this.CombinedFilePattern, sizeThreshold, filePatternNode.InnerText, autoRollAtTime, zipolderthannumdays, zipdateformat);
 
                     default:
                         throw new InvalidDataException("Undefined logging mode: " + this.LogMode);

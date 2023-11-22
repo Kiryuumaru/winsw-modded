@@ -18,12 +18,14 @@ namespace WinSW
     {
         private readonly string? outputPath;
         private readonly string? errorPath;
+        private readonly string? combinedPath;
 
-        public TempLogHandler(string? outputPath, string? errorPath)
-            : base(string.Empty, string.Empty, IsDisabled(outputPath), IsDisabled(errorPath), string.Empty, string.Empty)
+        public TempLogHandler(string? outputPath, string? errorPath, string? combinedPath)
+            : base(string.Empty, string.Empty, IsDisabled(outputPath), IsDisabled(errorPath), IsDisabled(combinedPath), string.Empty, string.Empty, string.Empty)
         {
             this.outputPath = outputPath;
             this.errorPath = errorPath;
+            this.combinedPath = combinedPath;
         }
 
         private static bool IsDisabled(string? path) => string.IsNullOrEmpty(path) || path!.Equals("NUL", StringComparison.OrdinalIgnoreCase);
@@ -37,6 +39,14 @@ namespace WinSW
         {
             return this.CopyStreamAsync(errorReader.BaseStream, new FileStream(this.errorPath!, FileMode.OpenOrCreate));
         }
+
+        protected override async Task LogCombined(StreamReader outputReader, StreamReader errorReader)
+        {
+            var stream = new FileStream(this.combinedPath!, FileMode.OpenOrCreate);
+            await Task.WhenAll(
+                this.CopyStreamAsync(outputReader.BaseStream, stream),
+                this.CopyStreamAsync(errorReader.BaseStream, stream));
+        }
     }
 
     /// <summary>
@@ -45,11 +55,12 @@ namespace WinSW
     public abstract class LogHandler
     {
 #pragma warning disable CS8618 // Non-nullable field is uninitialized. Consider declaring as nullable.
-        protected LogHandler(bool outFileDisabled, bool errFileDisabled)
+        protected LogHandler(bool outFileDisabled, bool errFileDisabled, bool combinedFileDisabled)
 #pragma warning restore CS8618 // Non-nullable field is uninitialized. Consider declaring as nullable.
         {
             this.OutFileDisabled = outFileDisabled;
             this.ErrFileDisabled = errFileDisabled;
+            this.CombinedFileDisabled = combinedFileDisabled;
         }
 
         /// <summary>
@@ -60,6 +71,8 @@ namespace WinSW
         public bool OutFileDisabled { get; }
 
         public bool ErrFileDisabled { get; }
+
+        public bool CombinedFileDisabled { get; }
 
         public abstract void Log(StreamReader outputReader, StreamReader errorReader);
 
@@ -104,12 +117,15 @@ namespace WinSW
 
         protected string ErrFilePattern { get; }
 
-        protected AbstractFileLogAppender(string logDirectory, string baseName, bool outFileDisabled, bool errFileDisabled, string outFilePattern, string errFilePattern)
-            : base(outFileDisabled, errFileDisabled)
+        protected string CombinedFilePattern { get; }
+
+        protected AbstractFileLogAppender(string logDirectory, string baseName, bool outFileDisabled, bool errFileDisabled, bool combinedFileDisabled, string outFilePattern, string errFilePattern, string combinedFilePattern)
+            : base(outFileDisabled, errFileDisabled, combinedFileDisabled)
         {
             this.BaseLogFileName = Path.Combine(logDirectory, baseName);
             this.OutFilePattern = outFilePattern;
             this.ErrFilePattern = errFilePattern;
+            this.CombinedFilePattern = combinedFilePattern;
         }
 
         public override void Log(StreamReader outputReader, StreamReader errorReader)
@@ -123,11 +139,18 @@ namespace WinSW
             {
                 this.SafeLogError(errorReader);
             }
+
+            if (!this.CombinedFileDisabled)
+            {
+                this.SafeLogCombined(outputReader, errorReader);
+            }
         }
 
         protected abstract Task LogOutput(StreamReader outputReader);
 
         protected abstract Task LogError(StreamReader errorReader);
+
+        protected abstract Task LogCombined(StreamReader outputReader, StreamReader errorReader);
 
         private async void SafeLogOutput(StreamReader outputReader)
         {
@@ -152,6 +175,18 @@ namespace WinSW
                 this.EventLogger.WriteEntry("Unhandled exception in task. " + e, EventLogEntryType.Error);
             }
         }
+
+        private async void SafeLogCombined(StreamReader outputReader, StreamReader errorReader)
+        {
+            try
+            {
+                await this.LogCombined(outputReader, errorReader);
+            }
+            catch (Exception e)
+            {
+                this.EventLogger.WriteEntry("Unhandled exception in task. " + e, EventLogEntryType.Error);
+            }
+        }
     }
 
     public abstract class SimpleLogAppender : AbstractFileLogAppender
@@ -162,12 +197,15 @@ namespace WinSW
 
         public string ErrorLogFileName { get; }
 
-        protected SimpleLogAppender(string logDirectory, string baseName, FileMode fileMode, bool outFileDisabled, bool errFileDisabled, string outFilePattern, string errFilePattern)
-            : base(logDirectory, baseName, outFileDisabled, errFileDisabled, outFilePattern, errFilePattern)
+        public string CombinedLogFileName { get; }
+
+        protected SimpleLogAppender(string logDirectory, string baseName, FileMode fileMode, bool outFileDisabled, bool errFileDisabled, bool combinedFileDisabled, string outFilePattern, string errFilePattern, string combinedFilePattern)
+            : base(logDirectory, baseName, outFileDisabled, errFileDisabled, combinedFileDisabled, outFilePattern, errFilePattern, combinedFilePattern)
         {
             this.FileMode = fileMode;
             this.OutputLogFileName = this.BaseLogFileName + this.OutFilePattern;
             this.ErrorLogFileName = this.BaseLogFileName + this.ErrFilePattern;
+            this.CombinedLogFileName = this.BaseLogFileName + this.CombinedFilePattern;
         }
 
         protected override Task LogOutput(StreamReader outputReader)
@@ -179,20 +217,28 @@ namespace WinSW
         {
             return this.CopyStreamAsync(errorReader.BaseStream, new FileStream(this.ErrorLogFileName, this.FileMode));
         }
+
+        protected override async Task LogCombined(StreamReader outputReader, StreamReader errorReader)
+        {
+            var stream = new FileStream(this.CombinedLogFileName, this.FileMode);
+            await Task.WhenAll(
+                this.CopyStreamAsync(outputReader.BaseStream, stream),
+                this.CopyStreamAsync(errorReader.BaseStream, stream));
+        }
     }
 
     public class DefaultLogAppender : SimpleLogAppender
     {
-        public DefaultLogAppender(string logDirectory, string baseName, bool outFileDisabled, bool errFileDisabled, string outFilePattern, string errFilePattern)
-            : base(logDirectory, baseName, FileMode.Append, outFileDisabled, errFileDisabled, outFilePattern, errFilePattern)
+        public DefaultLogAppender(string logDirectory, string baseName, bool outFileDisabled, bool errFileDisabled, bool combinedFileDisabled, string outFilePattern, string errFilePattern, string combinedFilePattern)
+            : base(logDirectory, baseName, FileMode.Append, outFileDisabled, errFileDisabled, combinedFileDisabled, outFilePattern, errFilePattern, combinedFilePattern)
         {
         }
     }
 
     public class ResetLogAppender : SimpleLogAppender
     {
-        public ResetLogAppender(string logDirectory, string baseName, bool outFileDisabled, bool errFileDisabled, string outFilePattern, string errFilePattern)
-            : base(logDirectory, baseName, FileMode.Create, outFileDisabled, errFileDisabled, outFilePattern, errFilePattern)
+        public ResetLogAppender(string logDirectory, string baseName, bool outFileDisabled, bool errFileDisabled, bool combinedFileDisabled, string outFilePattern, string errFilePattern, string combinedFilePattern)
+            : base(logDirectory, baseName, FileMode.Create, outFileDisabled, errFileDisabled, combinedFileDisabled, outFilePattern, errFilePattern, combinedFilePattern)
         {
         }
     }
@@ -203,7 +249,7 @@ namespace WinSW
     public class IgnoreLogAppender : LogHandler
     {
         public IgnoreLogAppender()
-            : base(true, true)
+            : base(true, true, true)
         {
         }
 
@@ -218,8 +264,8 @@ namespace WinSW
 
         public int Period { get; }
 
-        public TimeBasedRollingLogAppender(string logDirectory, string baseName, bool outFileDisabled, bool errFileDisabled, string outFilePattern, string errFilePattern, string pattern, int period)
-            : base(logDirectory, baseName, outFileDisabled, errFileDisabled, outFilePattern, errFilePattern)
+        public TimeBasedRollingLogAppender(string logDirectory, string baseName, bool outFileDisabled, bool errFileDisabled, bool combinedFileDisabled, string outFilePattern, string errFilePattern, string combinedFilePattern, string pattern, int period)
+            : base(logDirectory, baseName, outFileDisabled, errFileDisabled, combinedFileDisabled, outFilePattern, errFilePattern, combinedFilePattern)
         {
             this.Pattern = pattern;
             this.Period = period;
@@ -233,6 +279,13 @@ namespace WinSW
         protected override Task LogError(StreamReader errorReader)
         {
             return this.CopyStreamWithDateRotationAsync(errorReader, this.ErrFilePattern);
+        }
+
+        protected override async Task LogCombined(StreamReader outputReader, StreamReader errorReader)
+        {
+            await Task.WhenAll(
+                this.CopyStreamWithDateRotationAsync(outputReader, this.OutFilePattern),
+                this.CopyStreamWithDateRotationAsync(errorReader, this.ErrFilePattern));
         }
 
         /// <summary>
@@ -270,15 +323,15 @@ namespace WinSW
 
         public int FilesToKeep { get; }
 
-        public SizeBasedRollingLogAppender(string logDirectory, string baseName, bool outFileDisabled, bool errFileDisabled, string outFilePattern, string errFilePattern, int sizeThreshold, int filesToKeep)
-            : base(logDirectory, baseName, outFileDisabled, errFileDisabled, outFilePattern, errFilePattern)
+        public SizeBasedRollingLogAppender(string logDirectory, string baseName, bool outFileDisabled, bool errFileDisabled, bool combinedFileDisabled, string outFilePattern, string errFilePattern, string combinedFilePattern, int sizeThreshold, int filesToKeep)
+            : base(logDirectory, baseName, outFileDisabled, errFileDisabled, combinedFileDisabled, outFilePattern, errFilePattern, combinedFilePattern)
         {
             this.SizeThreshold = sizeThreshold;
             this.FilesToKeep = filesToKeep;
         }
 
-        public SizeBasedRollingLogAppender(string logDirectory, string baseName, bool outFileDisabled, bool errFileDisabled, string outFilePattern, string errFilePattern)
-            : this(logDirectory, baseName, outFileDisabled, errFileDisabled, outFilePattern, errFilePattern, DefaultSizeThreshold, DefaultFilesToKeep)
+        public SizeBasedRollingLogAppender(string logDirectory, string baseName, bool outFileDisabled, bool errFileDisabled, bool combinedFileDisabled, string outFilePattern, string errFilePattern, string combinedFilePattern)
+            : this(logDirectory, baseName, outFileDisabled, errFileDisabled, combinedFileDisabled, outFilePattern, errFilePattern, combinedFilePattern, DefaultSizeThreshold, DefaultFilesToKeep)
         {
         }
 
@@ -290,6 +343,13 @@ namespace WinSW
         protected override Task LogError(StreamReader errorReader)
         {
             return this.CopyStreamWithRotationAsync(errorReader, this.ErrFilePattern);
+        }
+
+        protected override async Task LogCombined(StreamReader outputReader, StreamReader errorReader)
+        {
+            await Task.WhenAll(
+                this.CopyStreamWithRotationAsync(outputReader, this.OutFilePattern),
+                this.CopyStreamWithRotationAsync(errorReader, this.ErrFilePattern));
         }
 
         /// <summary>
@@ -350,8 +410,8 @@ namespace WinSW
     /// </summary>
     public class RollingLogAppender : SimpleLogAppender
     {
-        public RollingLogAppender(string logDirectory, string baseName, bool outFileDisabled, bool errFileDisabled, string outFilePattern, string errFilePattern)
-            : base(logDirectory, baseName, FileMode.Append, outFileDisabled, errFileDisabled, outFilePattern, errFilePattern)
+        public RollingLogAppender(string logDirectory, string baseName, bool outFileDisabled, bool errFileDisabled, bool combinedFileDisabled, string outFilePattern, string errFilePattern, string combinedFilePattern)
+            : base(logDirectory, baseName, FileMode.Append, outFileDisabled, errFileDisabled, combinedFileDisabled, outFilePattern, errFilePattern, combinedFilePattern)
         {
         }
 
@@ -365,6 +425,11 @@ namespace WinSW
             if (!this.ErrFileDisabled)
             {
                 this.MoveFile(this.ErrorLogFileName, this.ErrorLogFileName + ".old");
+            }
+
+            if (!this.CombinedFileDisabled)
+            {
+                this.MoveFile(this.CombinedLogFileName, this.CombinedLogFileName + ".old");
             }
 
             base.Log(outputReader, errorReader);
@@ -390,14 +455,16 @@ namespace WinSW
             string baseName,
             bool outFileDisabled,
             bool errFileDisabled,
+            bool combinedFileDisabled,
             string outFilePattern,
             string errFilePattern,
+            string combinedFilePattern,
             int sizeThreshold,
             string filePattern,
             TimeSpan? autoRollAtTime,
             int? zipolderthannumdays,
             string zipdateformat)
-            : base(logDirectory, baseName, outFileDisabled, errFileDisabled, outFilePattern, errFilePattern)
+            : base(logDirectory, baseName, outFileDisabled, errFileDisabled, combinedFileDisabled, outFilePattern, errFilePattern, combinedFilePattern)
         {
             this.SizeThreshold = sizeThreshold;
             this.FilePattern = filePattern;
@@ -414,6 +481,13 @@ namespace WinSW
         protected override Task LogError(StreamReader errorReader)
         {
             return this.CopyStreamWithRotationAsync(errorReader, this.ErrFilePattern);
+        }
+
+        protected override async Task LogCombined(StreamReader outputReader, StreamReader errorReader)
+        {
+            await Task.WhenAll(
+                this.CopyStreamWithRotationAsync(outputReader, this.OutFilePattern),
+                this.CopyStreamWithRotationAsync(errorReader, this.ErrFilePattern));
         }
 
         private async Task CopyStreamWithRotationAsync(StreamReader reader, string extension)

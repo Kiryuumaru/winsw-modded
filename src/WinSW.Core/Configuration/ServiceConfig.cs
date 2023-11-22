@@ -72,9 +72,13 @@ namespace WinSW.Configuration
 
         public virtual bool ErrFileDisabled => false;
 
-        public virtual string OutFilePattern => ".out.log";
+        public virtual bool CombinedFileDisabled => false;
 
-        public virtual string ErrFilePattern => ".err.log";
+        public virtual string OutFilePattern => ".output.log";
+
+        public virtual string ErrFilePattern => ".error.log";
+
+        public virtual string CombinedFilePattern => ".combined.log";
 
         // Environment
         public virtual List<Download> Downloads => new(0);
