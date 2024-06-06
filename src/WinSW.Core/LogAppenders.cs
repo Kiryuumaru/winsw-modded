@@ -1,9 +1,13 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using WinSW.Util;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace WinSW
 {
@@ -32,20 +36,17 @@ namespace WinSW
 
         protected override Task LogOutput(StreamReader outputReader)
         {
-            return this.CopyStreamAsync(outputReader.BaseStream, new FileStream(this.outputPath!, FileMode.OpenOrCreate));
+            return this.CopyStreamAsync([outputReader.BaseStream], new FileStream(this.outputPath!, FileMode.OpenOrCreate));
         }
 
         protected override Task LogError(StreamReader errorReader)
         {
-            return this.CopyStreamAsync(errorReader.BaseStream, new FileStream(this.errorPath!, FileMode.OpenOrCreate));
+            return this.CopyStreamAsync([errorReader.BaseStream], new FileStream(this.errorPath!, FileMode.OpenOrCreate));
         }
 
-        protected override async Task LogCombined(StreamReader outputReader, StreamReader errorReader)
+        protected override Task LogCombined(StreamReader outputReader, StreamReader errorReader)
         {
-            var stream = new FileStream(this.combinedPath!, FileMode.OpenOrCreate);
-            await Task.WhenAll(
-                this.CopyStreamAsync(outputReader.BaseStream, stream),
-                this.CopyStreamAsync(errorReader.BaseStream, stream));
+            return this.CopyStreamAsync([outputReader.BaseStream, errorReader.BaseStream], new FileStream(this.errorPath!, FileMode.OpenOrCreate));
         }
     }
 
@@ -79,14 +80,18 @@ namespace WinSW
         /// <summary>
         /// Convenience method to copy stuff from StreamReader to StreamWriter
         /// </summary>
-        protected async Task CopyStreamAsync(Stream reader, Stream writer)
+        protected async Task CopyStreamAsync(Stream[] readers, Stream writer)
         {
-            var copy = new StreamCopyOperation(reader, writer);
+            var copy = new StreamCopyOperation(readers, writer);
             while (await copy.CopyLineAsync() != 0)
             {
             }
 
-            reader.Dispose();
+            foreach (var reader in readers)
+            {
+                reader.Dispose();
+            }
+
             writer.Dispose();
         }
 
@@ -210,20 +215,17 @@ namespace WinSW
 
         protected override Task LogOutput(StreamReader outputReader)
         {
-            return this.CopyStreamAsync(outputReader.BaseStream, new FileStream(this.OutputLogFileName, this.FileMode));
+            return this.CopyStreamAsync([outputReader.BaseStream], new FileStream(this.OutputLogFileName, this.FileMode));
         }
 
         protected override Task LogError(StreamReader errorReader)
         {
-            return this.CopyStreamAsync(errorReader.BaseStream, new FileStream(this.ErrorLogFileName, this.FileMode));
+            return this.CopyStreamAsync([errorReader.BaseStream], new FileStream(this.ErrorLogFileName, this.FileMode));
         }
 
-        protected override async Task LogCombined(StreamReader outputReader, StreamReader errorReader)
+        protected override Task LogCombined(StreamReader outputReader, StreamReader errorReader)
         {
-            var stream = new FileStream(this.CombinedLogFileName, this.FileMode);
-            await Task.WhenAll(
-                this.CopyStreamAsync(outputReader.BaseStream, stream),
-                this.CopyStreamAsync(errorReader.BaseStream, stream));
+            return this.CopyStreamAsync([outputReader.BaseStream, errorReader.BaseStream], new FileStream(this.ErrorLogFileName, this.FileMode));
         }
     }
 
@@ -273,31 +275,29 @@ namespace WinSW
 
         protected override Task LogOutput(StreamReader outputReader)
         {
-            return this.CopyStreamWithDateRotationAsync(outputReader, this.OutFilePattern);
+            return this.CopyStreamWithDateRotationAsync([outputReader], this.OutFilePattern);
         }
 
         protected override Task LogError(StreamReader errorReader)
         {
-            return this.CopyStreamWithDateRotationAsync(errorReader, this.ErrFilePattern);
+            return this.CopyStreamWithDateRotationAsync([errorReader], this.ErrFilePattern);
         }
 
-        protected override async Task LogCombined(StreamReader outputReader, StreamReader errorReader)
+        protected override Task LogCombined(StreamReader outputReader, StreamReader errorReader)
         {
-            await Task.WhenAll(
-                this.CopyStreamWithDateRotationAsync(outputReader, this.OutFilePattern),
-                this.CopyStreamWithDateRotationAsync(errorReader, this.ErrFilePattern));
+            return this.CopyStreamWithDateRotationAsync([outputReader, errorReader], this.CombinedFilePattern);
         }
 
         /// <summary>
         /// Works like the CopyStream method but does a log rotation based on time.
         /// </summary>
-        private async Task CopyStreamWithDateRotationAsync(StreamReader reader, string ext)
+        private async Task CopyStreamWithDateRotationAsync(StreamReader[] readers, string ext)
         {
             var periodicRollingCalendar = new PeriodicRollingCalendar(this.Pattern, this.Period);
             periodicRollingCalendar.Init();
 
             var writer = new FileStream(this.BaseLogFileName + "_" + periodicRollingCalendar.Format + ext, FileMode.Append);
-            var copy = new StreamCopyOperation(reader.BaseStream, writer);
+            var copy = new StreamCopyOperation(readers.Select(i => i.BaseStream).ToArray(), writer);
             while (await copy.CopyLineAsync() != 0)
             {
                 if (periodicRollingCalendar.ShouldRoll)
@@ -307,7 +307,11 @@ namespace WinSW
                 }
             }
 
-            reader.Dispose();
+            foreach (var reader in readers)
+            {
+                reader.Dispose();
+            }
+
             writer.Dispose();
         }
     }
@@ -337,28 +341,26 @@ namespace WinSW
 
         protected override Task LogOutput(StreamReader outputReader)
         {
-            return this.CopyStreamWithRotationAsync(outputReader, this.OutFilePattern);
+            return this.CopyStreamWithRotationAsync([outputReader], this.OutFilePattern);
         }
 
         protected override Task LogError(StreamReader errorReader)
         {
-            return this.CopyStreamWithRotationAsync(errorReader, this.ErrFilePattern);
+            return this.CopyStreamWithRotationAsync([errorReader], this.ErrFilePattern);
         }
 
-        protected override async Task LogCombined(StreamReader outputReader, StreamReader errorReader)
+        protected override Task LogCombined(StreamReader outputReader, StreamReader errorReader)
         {
-            await Task.WhenAll(
-                this.CopyStreamWithRotationAsync(outputReader, this.OutFilePattern),
-                this.CopyStreamWithRotationAsync(errorReader, this.ErrFilePattern));
+            return this.CopyStreamWithRotationAsync([outputReader, errorReader], this.CombinedFilePattern);
         }
 
         /// <summary>
         /// Works like the CopyStream method but does a log rotation.
         /// </summary>
-        private async Task CopyStreamWithRotationAsync(StreamReader reader, string ext)
+        private async Task CopyStreamWithRotationAsync(StreamReader[] readers, string ext)
         {
             var writer = new FileStream(this.BaseLogFileName + ext, FileMode.Append);
-            var copy = new StreamCopyOperation(reader.BaseStream, writer);
+            var copy = new StreamCopyOperation(readers.Select(i => i.BaseStream).ToArray(), writer);
             long fileLength = new FileInfo(this.BaseLogFileName + ext).Length;
 
             int written;
@@ -400,7 +402,11 @@ namespace WinSW
                 }
             }
 
-            reader.Dispose();
+            foreach (var reader in readers)
+            {
+                reader.Dispose();
+            }
+
             writer.Dispose();
         }
     }
@@ -475,22 +481,20 @@ namespace WinSW
 
         protected override Task LogOutput(StreamReader outputReader)
         {
-            return this.CopyStreamWithRotationAsync(outputReader, this.OutFilePattern);
+            return this.CopyStreamWithRotationAsync([outputReader], this.OutFilePattern);
         }
 
         protected override Task LogError(StreamReader errorReader)
         {
-            return this.CopyStreamWithRotationAsync(errorReader, this.ErrFilePattern);
+            return this.CopyStreamWithRotationAsync([errorReader], this.ErrFilePattern);
         }
 
-        protected override async Task LogCombined(StreamReader outputReader, StreamReader errorReader)
+        protected override Task LogCombined(StreamReader outputReader, StreamReader errorReader)
         {
-            await Task.WhenAll(
-                this.CopyStreamWithRotationAsync(outputReader, this.OutFilePattern),
-                this.CopyStreamWithRotationAsync(errorReader, this.ErrFilePattern));
+            return this.CopyStreamWithRotationAsync([outputReader, errorReader], this.CombinedFilePattern);
         }
 
-        private async Task CopyStreamWithRotationAsync(StreamReader reader, string extension)
+        private async Task CopyStreamWithRotationAsync(StreamReader[] readers, string extension)
         {
             // lock required as the timer thread and the thread that will write to the stream could try and access the file stream at the same time
             object? fileLock = new();
@@ -500,7 +504,7 @@ namespace WinSW
             string? logFile = this.BaseLogFileName + extension;
 
             var writer = new FileStream(logFile, FileMode.Append);
-            var copy = new StreamCopyOperation(reader.BaseStream, writer);
+            var copy = new StreamCopyOperation(readers.Select(i => i.BaseStream).ToArray(), writer);
             long fileLength = new FileInfo(logFile).Length;
 
             // We auto roll at time is configured then we need to create a timer and wait until time is elasped and roll the file over
@@ -575,7 +579,11 @@ namespace WinSW
                 }
             }
 
-            reader.Dispose();
+            foreach (var reader in readers)
+            {
+                reader.Dispose();
+            }
+
             writer.Dispose();
         }
 
@@ -702,66 +710,123 @@ namespace WinSW
     internal sealed class StreamCopyOperation
     {
         private const int BufferSize = 1024;
+        private readonly Stream[] readers;
 
-        private readonly byte[] buffer;
-        private readonly Stream reader;
-
-        private int startIndex;
-        private int endIndex;
+        private int[] startIndex;
+        private int[] endIndex;
 
         internal Stream Writer;
 
         internal StreamCopyOperation(Stream reader, Stream writer)
         {
-            this.buffer = new byte[BufferSize];
-            this.reader = reader;
-            this.startIndex = 0;
-            this.endIndex = 0;
+            this.readers = [reader];
+            this.startIndex = [0];
+            this.endIndex = [0];
             this.Writer = writer;
+        }
+
+        internal StreamCopyOperation(Stream[] readers, Stream writer)
+        {
+            this.readers = readers;
+            this.startIndex = new int[readers.Length];
+            this.endIndex = new int[readers.Length];
+            this.Writer = writer;
+
+            for (int i = 0; i < this.startIndex.Length; i++)
+            {
+                this.startIndex[i] = 0;
+            }
+
+            for (int i = 0; i < this.endIndex.Length; i++)
+            {
+                this.endIndex[i] = 0;
+            }
         }
 
         internal async Task<int> CopyLineAsync()
         {
-            byte[] buffer = this.buffer;
-            var source = this.reader;
-            int startIndex = this.startIndex;
-            int endIndex = this.endIndex;
-            var destination = this.Writer;
+            List<Task> tasks = [];
+            int allTotal = 0;
+            SemaphoreSlim allTotalLocker = new(1);
+            SemaphoreSlim writerLocker = new(1);
 
-            int total = 0;
-            while (true)
+            for (int i = 0; i < this.readers.Length; i++)
             {
-                if (startIndex == 0)
+                int index = i;
+                tasks.Add(Task.Run(async () =>
                 {
-                    if ((endIndex = await source.ReadAsync(buffer, 0, BufferSize)) == 0)
+                    byte[] buffer = new byte[BufferSize];
+                    var source = this.readers[index];
+                    int startIndex = this.startIndex[index];
+                    int endIndex = this.endIndex[index];
+                    var destination = this.Writer;
+
+                    int total = 0;
+                    while (true)
                     {
-                        break;
+                        if (startIndex == 0)
+                        {
+                            if ((endIndex = await source.ReadAsync(buffer, 0, BufferSize)) == 0)
+                            {
+                                break;
+                            }
+                        }
+
+                        int buffered = endIndex - startIndex;
+
+                        int newLineIndex = Array.IndexOf(buffer, (byte)'\n', startIndex, buffered);
+                        if (newLineIndex >= 0)
+                        {
+                            int count = newLineIndex - startIndex + 1;
+                            total += count;
+                            try
+                            {
+                                await writerLocker.WaitAsync();
+                                destination.Write(buffer, startIndex, count);
+                                destination.Flush();
+                            }
+                            finally
+                            {
+                                writerLocker.Release();
+                            }
+
+                            startIndex = (newLineIndex + 1) % BufferSize;
+                            break;
+                        }
+
+                        total += buffered;
+                        try
+                        {
+                            await writerLocker.WaitAsync();
+                            destination.Write(buffer, startIndex, buffered);
+                            destination.Flush();
+                        }
+                        finally
+                        {
+                            writerLocker.Release();
+                        }
+
+                        startIndex = 0;
                     }
-                }
 
-                int buffered = endIndex - startIndex;
+                    this.startIndex[index] = startIndex;
+                    this.endIndex[index] = endIndex;
 
-                int newLineIndex = Array.IndexOf(buffer, (byte)'\n', startIndex, buffered);
-                if (newLineIndex >= 0)
-                {
-                    int count = newLineIndex - startIndex + 1;
-                    total += count;
-                    destination.Write(buffer, startIndex, count);
-                    destination.Flush();
-                    startIndex = (newLineIndex + 1) % BufferSize;
-                    break;
-                }
-
-                total += buffered;
-                destination.Write(buffer, startIndex, buffered);
-                destination.Flush();
-                startIndex = 0;
+                    try
+                    {
+                        await allTotalLocker.WaitAsync();
+                        allTotal += total;
+                    }
+                    finally
+                    {
+                        allTotalLocker.Release();
+                    }
+                }));
             }
 
-            this.startIndex = startIndex;
-            this.endIndex = endIndex;
+            await Task.WhenAll(tasks);
 
-            return total;
+            return allTotal;
         }
     }
 }
