@@ -46,7 +46,7 @@ namespace WinSW
 
         protected override Task LogCombined(StreamReader outputReader, StreamReader errorReader)
         {
-            return this.CopyStreamAsync([outputReader.BaseStream, errorReader.BaseStream], new FileStream(this.errorPath!, FileMode.OpenOrCreate));
+            return this.CopyStreamAsync([outputReader.BaseStream, errorReader.BaseStream], new FileStream(this.combinedPath!, FileMode.OpenOrCreate));
         }
     }
 
@@ -225,7 +225,7 @@ namespace WinSW
 
         protected override Task LogCombined(StreamReader outputReader, StreamReader errorReader)
         {
-            return this.CopyStreamAsync([outputReader.BaseStream, errorReader.BaseStream], new FileStream(this.ErrorLogFileName, this.FileMode));
+            return this.CopyStreamAsync([outputReader.BaseStream, errorReader.BaseStream], new FileStream(this.CombinedLogFileName, this.FileMode));
         }
     }
 
