@@ -6,8 +6,9 @@ using System.IO.Compression;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using WinSW.Core;
+using WinSW.Core.Extensions;
 using WinSW.Util;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace WinSW
 {
@@ -34,19 +35,38 @@ namespace WinSW
 
         private static bool IsDisabled(string? path) => string.IsNullOrEmpty(path) || path!.Equals("NUL", StringComparison.OrdinalIgnoreCase);
 
-        protected override Task LogOutput(StreamReader outputReader)
+        protected override Task LogOutput(Stream outputReader)
         {
-            return this.CopyStreamAsync([outputReader.BaseStream], new FileStream(this.outputPath!, FileMode.OpenOrCreate));
+            List<Stream> streams = [];
+
+            if (!this.OutFileDisabled)
+            {
+                streams.Add(new FileStream(this.outputPath!, FileMode.OpenOrCreate));
+            }
+
+            if (!this.CombinedFileDisabled)
+            {
+                streams.Add(new FileStream(this.combinedPath!, FileMode.OpenOrCreate));
+            }
+
+            return this.CopyStreamAsync(outputReader, [.. streams]);
         }
 
-        protected override Task LogError(StreamReader errorReader)
+        protected override Task LogError(Stream errorReader)
         {
-            return this.CopyStreamAsync([errorReader.BaseStream], new FileStream(this.errorPath!, FileMode.OpenOrCreate));
-        }
+            List<Stream> streams = [];
 
-        protected override Task LogCombined(StreamReader outputReader, StreamReader errorReader)
-        {
-            return this.CopyStreamAsync([outputReader.BaseStream, errorReader.BaseStream], new FileStream(this.combinedPath!, FileMode.OpenOrCreate));
+            if (!this.ErrFileDisabled)
+            {
+                streams.Add(new FileStream(this.errorPath!, FileMode.OpenOrCreate));
+            }
+
+            if (!this.CombinedFileDisabled)
+            {
+                streams.Add(new FileStream(this.combinedPath!, FileMode.OpenOrCreate));
+            }
+
+            return this.CopyStreamAsync(errorReader, [.. streams]);
         }
     }
 
@@ -80,19 +100,23 @@ namespace WinSW
         /// <summary>
         /// Convenience method to copy stuff from StreamReader to StreamWriter
         /// </summary>
-        protected async Task CopyStreamAsync(Stream[] readers, Stream writer)
+        protected async Task CopyStreamAsync(Stream reader, Stream[] writers)
         {
-            var copy = new StreamCopyOperation(readers, writer);
+            if (writers.Length == 0)
+            {
+                return;
+            }
+
+            var copy = new StreamCopyOperation(reader, writers);
             while (await copy.CopyLineAsync() != 0)
             {
             }
 
-            foreach (var reader in readers)
+            reader.Dispose();
+            foreach (var writer in writers)
             {
-                reader.Dispose();
+                writer.Dispose();
             }
-
-            writer.Dispose();
         }
 
         /// <summary>
@@ -135,29 +159,15 @@ namespace WinSW
 
         public override void Log(StreamReader outputReader, StreamReader errorReader)
         {
-            if (!this.OutFileDisabled)
-            {
-                this.SafeLogOutput(outputReader);
-            }
-
-            if (!this.ErrFileDisabled)
-            {
-                this.SafeLogError(errorReader);
-            }
-
-            if (!this.CombinedFileDisabled)
-            {
-                this.SafeLogCombined(outputReader, errorReader);
-            }
+            this.SafeLogOutput(outputReader.BaseStream);
+            this.SafeLogError(errorReader.BaseStream);
         }
 
-        protected abstract Task LogOutput(StreamReader outputReader);
+        protected abstract Task LogOutput(Stream outputReader);
 
-        protected abstract Task LogError(StreamReader errorReader);
+        protected abstract Task LogError(Stream errorReader);
 
-        protected abstract Task LogCombined(StreamReader outputReader, StreamReader errorReader);
-
-        private async void SafeLogOutput(StreamReader outputReader)
+        private async void SafeLogOutput(Stream outputReader)
         {
             try
             {
@@ -169,23 +179,11 @@ namespace WinSW
             }
         }
 
-        private async void SafeLogError(StreamReader errorReader)
+        private async void SafeLogError(Stream errorReader)
         {
             try
             {
                 await this.LogError(errorReader);
-            }
-            catch (Exception e)
-            {
-                this.EventLogger.WriteEntry("Unhandled exception in task. " + e, EventLogEntryType.Error);
-            }
-        }
-
-        private async void SafeLogCombined(StreamReader outputReader, StreamReader errorReader)
-        {
-            try
-            {
-                await this.LogCombined(outputReader, errorReader);
             }
             catch (Exception e)
             {
@@ -213,19 +211,38 @@ namespace WinSW
             this.CombinedLogFileName = this.BaseLogFileName + this.CombinedFilePattern;
         }
 
-        protected override Task LogOutput(StreamReader outputReader)
+        protected override Task LogOutput(Stream outputReader)
         {
-            return this.CopyStreamAsync([outputReader.BaseStream], new FileStream(this.OutputLogFileName, this.FileMode));
+            List<Stream> streams = [];
+
+            if (!this.OutFileDisabled)
+            {
+                streams.Add(new FileStream(this.OutputLogFileName, this.FileMode));
+            }
+
+            if (!this.CombinedFileDisabled)
+            {
+                streams.Add(new FileStream(this.CombinedLogFileName, this.FileMode));
+            }
+
+            return this.CopyStreamAsync(outputReader, [.. streams]);
         }
 
-        protected override Task LogError(StreamReader errorReader)
+        protected override Task LogError(Stream errorReader)
         {
-            return this.CopyStreamAsync([errorReader.BaseStream], new FileStream(this.ErrorLogFileName, this.FileMode));
-        }
+            List<Stream> streams = [];
 
-        protected override Task LogCombined(StreamReader outputReader, StreamReader errorReader)
-        {
-            return this.CopyStreamAsync([outputReader.BaseStream, errorReader.BaseStream], new FileStream(this.CombinedLogFileName, this.FileMode));
+            if (!this.ErrFileDisabled)
+            {
+                streams.Add(new FileStream(this.ErrorLogFileName, this.FileMode));
+            }
+
+            if (!this.CombinedFileDisabled)
+            {
+                streams.Add(new FileStream(this.CombinedLogFileName, this.FileMode));
+            }
+
+            return this.CopyStreamAsync(errorReader, [.. streams]);
         }
     }
 
@@ -273,46 +290,86 @@ namespace WinSW
             this.Period = period;
         }
 
-        protected override Task LogOutput(StreamReader outputReader)
+        protected override Task LogOutput(Stream outputReader)
         {
-            return this.CopyStreamWithDateRotationAsync([outputReader], this.OutFilePattern);
+            List<string> exts = [];
+
+            if (!this.OutFileDisabled)
+            {
+                exts.Add(this.OutFilePattern);
+            }
+
+            if (!this.CombinedFileDisabled)
+            {
+                exts.Add(this.CombinedFilePattern);
+            }
+
+            return this.CopyStreamWithDateRotationAsync(outputReader, [.. exts]);
         }
 
-        protected override Task LogError(StreamReader errorReader)
+        protected override Task LogError(Stream errorReader)
         {
-            return this.CopyStreamWithDateRotationAsync([errorReader], this.ErrFilePattern);
-        }
+            List<string> exts = [];
 
-        protected override Task LogCombined(StreamReader outputReader, StreamReader errorReader)
-        {
-            return this.CopyStreamWithDateRotationAsync([outputReader, errorReader], this.CombinedFilePattern);
+            if (!this.ErrFileDisabled)
+            {
+                exts.Add(this.ErrFilePattern);
+            }
+
+            if (!this.CombinedFileDisabled)
+            {
+                exts.Add(this.CombinedFilePattern);
+            }
+
+            return this.CopyStreamWithDateRotationAsync(errorReader, [.. exts]);
         }
 
         /// <summary>
         /// Works like the CopyStream method but does a log rotation based on time.
         /// </summary>
-        private async Task CopyStreamWithDateRotationAsync(StreamReader[] readers, string ext)
+        private async Task CopyStreamWithDateRotationAsync(Stream reader, string[] exts)
         {
+            if (exts.Length == 0)
+            {
+                return;
+            }
+
             var periodicRollingCalendar = new PeriodicRollingCalendar(this.Pattern, this.Period);
             periodicRollingCalendar.Init();
 
-            var writer = new FileStream(this.BaseLogFileName + "_" + periodicRollingCalendar.Format + ext, FileMode.Append);
-            var copy = new StreamCopyOperation(readers.Select(i => i.BaseStream).ToArray(), writer);
+            List<Stream> streams = [];
+            foreach (string ext in exts)
+            {
+                var writer = new FileStream(this.BaseLogFileName + "_" + periodicRollingCalendar.Format + ext, FileMode.Append);
+                streams.Add(writer);
+            }
+
+            var copy = new StreamCopyOperation(reader, [.. streams]);
             while (await copy.CopyLineAsync() != 0)
             {
                 if (periodicRollingCalendar.ShouldRoll)
                 {
-                    writer.Dispose();
-                    copy.Writer = writer = new FileStream(this.BaseLogFileName + "_" + periodicRollingCalendar.Format + ext, FileMode.Create);
+                    foreach (var stream in streams)
+                    {
+                        stream.Dispose();
+                    }
+
+                    streams.Clear();
+                    foreach (string ext in exts)
+                    {
+                        var writer = new FileStream(this.BaseLogFileName + "_" + periodicRollingCalendar.Format + ext, FileMode.Create);
+                        streams.Add(writer);
+                    }
+
+                    copy.Writers = [.. streams];
                 }
             }
 
-            foreach (var reader in readers)
+            reader.Dispose();
+            foreach (var stream in streams)
             {
-                reader.Dispose();
+                stream.Dispose();
             }
-
-            writer.Dispose();
         }
     }
 
@@ -339,29 +396,59 @@ namespace WinSW
         {
         }
 
-        protected override Task LogOutput(StreamReader outputReader)
+        protected override Task LogOutput(Stream outputReader)
         {
-            return this.CopyStreamWithRotationAsync([outputReader], this.OutFilePattern);
+            List<string> exts = [];
+
+            if (!this.OutFileDisabled)
+            {
+                exts.Add(this.OutFilePattern);
+            }
+
+            if (!this.CombinedFileDisabled)
+            {
+                exts.Add(this.CombinedFilePattern);
+            }
+
+            return this.CopyStreamWithRotationAsync(outputReader, [.. exts]);
         }
 
-        protected override Task LogError(StreamReader errorReader)
+        protected override Task LogError(Stream errorReader)
         {
-            return this.CopyStreamWithRotationAsync([errorReader], this.ErrFilePattern);
-        }
+            List<string> exts = [];
 
-        protected override Task LogCombined(StreamReader outputReader, StreamReader errorReader)
-        {
-            return this.CopyStreamWithRotationAsync([outputReader, errorReader], this.CombinedFilePattern);
+            if (!this.ErrFileDisabled)
+            {
+                exts.Add(this.ErrFilePattern);
+            }
+
+            if (!this.CombinedFileDisabled)
+            {
+                exts.Add(this.CombinedFilePattern);
+            }
+
+            return this.CopyStreamWithRotationAsync(errorReader, [.. exts]);
         }
 
         /// <summary>
         /// Works like the CopyStream method but does a log rotation.
         /// </summary>
-        private async Task CopyStreamWithRotationAsync(StreamReader[] readers, string ext)
+        private async Task CopyStreamWithRotationAsync(Stream reader, string[] exts)
         {
-            var writer = new FileStream(this.BaseLogFileName + ext, FileMode.Append);
-            var copy = new StreamCopyOperation(readers.Select(i => i.BaseStream).ToArray(), writer);
-            long fileLength = new FileInfo(this.BaseLogFileName + ext).Length;
+            if (exts.Length == 0)
+            {
+                return;
+            }
+
+            List<Stream> streams = [];
+            foreach (string ext in exts)
+            {
+                var writer = new FileStream(this.BaseLogFileName + ext, FileMode.Append);
+                streams.Add(writer);
+            }
+
+            var copy = new StreamCopyOperation(reader, [.. streams]);
+            long fileLength = new FileInfo(this.BaseLogFileName + exts.First()).Length;
 
             int written;
             while ((written = await copy.CopyLineAsync()) != 0)
@@ -369,14 +456,17 @@ namespace WinSW
                 fileLength += written;
                 if (fileLength > this.SizeThreshold)
                 {
-                    writer.Dispose();
+                    foreach (var writer in streams)
+                    {
+                        writer.Dispose();
+                    }
 
                     try
                     {
                         for (int j = this.FilesToKeep; j >= 2; j--)
                         {
-                            string dst = this.BaseLogFileName + "." + (j - 1) + ext;
-                            string src = this.BaseLogFileName + "." + (j - 2) + ext;
+                            string dst = this.BaseLogFileName + "." + (j - 1) + exts.First();
+                            string src = this.BaseLogFileName + "." + (j - 2) + exts.First();
                             if (File.Exists(dst))
                             {
                                 File.Delete(dst);
@@ -388,7 +478,7 @@ namespace WinSW
                             }
                         }
 
-                        File.Move(this.BaseLogFileName + ext, this.BaseLogFileName + ".0" + ext);
+                        File.Move(this.BaseLogFileName + exts.First(), this.BaseLogFileName + ".0" + exts.First());
                     }
                     catch (IOException e)
                     {
@@ -397,17 +487,23 @@ namespace WinSW
 
                     // even if the log rotation fails, create a new one, or else
                     // we'll infinitely try to roll.
-                    copy.Writer = writer = new FileStream(this.BaseLogFileName + ext, FileMode.Create);
-                    fileLength = new FileInfo(this.BaseLogFileName + ext).Length;
+                    streams.Clear();
+                    foreach (string ext in exts)
+                    {
+                        var writer = new FileStream(this.BaseLogFileName + ext, FileMode.Create);
+                        streams.Add(writer);
+                    }
+
+                    copy.Writers = [.. streams];
+                    fileLength = new FileInfo(this.BaseLogFileName + exts.First()).Length;
                 }
             }
 
-            foreach (var reader in readers)
+            reader.Dispose();
+            foreach (var writer in streams)
             {
-                reader.Dispose();
+                writer.Dispose();
             }
-
-            writer.Dispose();
         }
     }
 
@@ -479,33 +575,62 @@ namespace WinSW
             this.ZipDateFormat = zipdateformat;
         }
 
-        protected override Task LogOutput(StreamReader outputReader)
+        protected override Task LogOutput(Stream outputReader)
         {
-            return this.CopyStreamWithRotationAsync([outputReader], this.OutFilePattern);
+            List<string> exts = [];
+
+            if (!this.OutFileDisabled)
+            {
+                exts.Add(this.OutFilePattern);
+            }
+
+            if (!this.CombinedFileDisabled)
+            {
+                exts.Add(this.CombinedFilePattern);
+            }
+
+            return this.CopyStreamWithRotationAsync(outputReader, [.. exts]);
         }
 
-        protected override Task LogError(StreamReader errorReader)
+        protected override Task LogError(Stream errorReader)
         {
-            return this.CopyStreamWithRotationAsync([errorReader], this.ErrFilePattern);
+            List<string> exts = [];
+
+            if (!this.OutFileDisabled)
+            {
+                exts.Add(this.OutFilePattern);
+            }
+
+            if (!this.CombinedFileDisabled)
+            {
+                exts.Add(this.CombinedFilePattern);
+            }
+
+            return this.CopyStreamWithRotationAsync(errorReader, [.. exts]);
         }
 
-        protected override Task LogCombined(StreamReader outputReader, StreamReader errorReader)
+        private async Task CopyStreamWithRotationAsync(Stream reader, string[] extensions)
         {
-            return this.CopyStreamWithRotationAsync([outputReader, errorReader], this.CombinedFilePattern);
-        }
+            if (extensions.Length == 0)
+            {
+                return;
+            }
 
-        private async Task CopyStreamWithRotationAsync(StreamReader[] readers, string extension)
-        {
             // lock required as the timer thread and the thread that will write to the stream could try and access the file stream at the same time
             object? fileLock = new();
 
             string? baseDirectory = Path.GetDirectoryName(this.BaseLogFileName)!;
             string? baseFileName = Path.GetFileName(this.BaseLogFileName);
-            string? logFile = this.BaseLogFileName + extension;
 
-            var writer = new FileStream(logFile, FileMode.Append);
-            var copy = new StreamCopyOperation(readers.Select(i => i.BaseStream).ToArray(), writer);
-            long fileLength = new FileInfo(logFile).Length;
+            List<Stream> streams = [];
+            foreach (string extension in extensions)
+            {
+                var writer = new FileStream(this.BaseLogFileName + extension, FileMode.Append);
+                streams.Add(writer);
+            }
+
+            var copy = new StreamCopyOperation(reader, [.. streams]);
+            long fileLength = new FileInfo(this.BaseLogFileName + extensions.First()).Length;
 
             // We auto roll at time is configured then we need to create a timer and wait until time is elasped and roll the file over
             if (this.AutoRollAtTime is TimeSpan autoRollAtTime)
@@ -520,19 +645,38 @@ namespace WinSW
                         timer.Stop();
                         lock (fileLock)
                         {
-                            writer.Dispose();
+                            foreach (var writer in streams)
+                            {
+                                writer.Dispose();
+                            }
 
                             var now = DateTime.Now.AddDays(-1);
-                            int nextFileNumber = this.GetNextFileNumber(extension, baseDirectory, baseFileName, now);
-                            string? nextFileName = Path.Combine(baseDirectory, string.Format("{0}.{1}.#{2:D4}{3}", baseFileName, now.ToString(this.FilePattern), nextFileNumber, extension));
-                            File.Move(logFile, nextFileName);
+                            foreach (string extension in extensions)
+                            {
+                                string? logFile = this.BaseLogFileName + extensions;
+                                int nextFileNumber = this.GetNextFileNumber(extension, baseDirectory, baseFileName, now);
+                                string? nextFileName = Path.Combine(baseDirectory, string.Format("{0}.{1}.#{2:D4}{3}", baseFileName, now.ToString(this.FilePattern), nextFileNumber, extension));
+                                File.Move(logFile, nextFileName);
+                            }
 
-                            copy.Writer = writer = new FileStream(logFile, FileMode.Create);
-                            fileLength = new FileInfo(logFile).Length;
+                            streams.Clear();
+                            foreach (string extension in extensions)
+                            {
+                                string? logFile = this.BaseLogFileName + extensions;
+                                var writer = new FileStream(logFile, FileMode.Create);
+                                streams.Add(writer);
+                            }
+
+                            copy.Writers = [.. streams];
+
+                            fileLength = new FileInfo(this.BaseLogFileName + extensions.First()).Length;
                         }
 
                         // Next day so check if file can be zipped
-                        this.ZipFiles(baseDirectory, extension, baseFileName);
+                        foreach (string extension in extensions)
+                        {
+                            this.ZipFiles(baseDirectory, extension, baseFileName);
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -560,16 +704,29 @@ namespace WinSW
                         {
                             // roll file
                             var now = DateTime.Now;
-                            int nextFileNumber = this.GetNextFileNumber(extension, baseDirectory, baseFileName, now);
-                            string? nextFileName = Path.Combine(
-                                    baseDirectory,
-                                    string.Format("{0}.{1}.#{2:D4}{3}", baseFileName, now.ToString(this.FilePattern), nextFileNumber, extension));
-                            File.Move(logFile, nextFileName);
+                            foreach (string extension in extensions)
+                            {
+                                string? logFile = this.BaseLogFileName + extensions;
+                                int nextFileNumber = this.GetNextFileNumber(extension, baseDirectory, baseFileName, now);
+                                string? nextFileName = Path.Combine(
+                                        baseDirectory,
+                                        string.Format("{0}.{1}.#{2:D4}{3}", baseFileName, now.ToString(this.FilePattern), nextFileNumber, extension));
+                                File.Move(logFile, nextFileName);
+                            }
 
                             // even if the log rotation fails, create a new one, or else
                             // we'll infinitely try to roll.
-                            copy.Writer = writer = new FileStream(logFile, FileMode.Create);
-                            fileLength = new FileInfo(logFile).Length;
+                            streams.Clear();
+                            foreach (string extension in extensions)
+                            {
+                                string? logFile = this.BaseLogFileName + extensions;
+                                var writer = new FileStream(logFile, FileMode.Create);
+                                streams.Add(writer);
+                            }
+
+                            copy.Writers = [.. streams];
+
+                            fileLength = new FileInfo(this.BaseLogFileName + extensions.First()).Length;
                         }
                         catch (Exception e)
                         {
@@ -579,12 +736,11 @@ namespace WinSW
                 }
             }
 
-            foreach (var reader in readers)
+            reader.Dispose();
+            foreach (var writer in streams)
             {
-                reader.Dispose();
+                writer.Dispose();
             }
-
-            writer.Dispose();
         }
 
         private void ZipFiles(string directory, string fileExtension, string zipFileBaseName)
@@ -710,113 +866,94 @@ namespace WinSW
     internal sealed class StreamCopyOperation
     {
         private const int BufferSize = 1024;
-        private readonly Stream[] readers;
-        private readonly byte[][] buffers;
-        private readonly int[] startIndex;
-        private readonly int[] endIndex;
 
-        internal Stream Writer;
+        private readonly byte[] buffer;
+        private readonly Stream reader;
 
-        internal StreamCopyOperation(Stream[] readers, Stream writer)
+        private int startIndex;
+        private int endIndex;
+
+        internal Stream[] Writers;
+
+        internal StreamCopyOperation(Stream reader, Stream writer)
         {
-            this.readers = readers;
-            this.buffers = new byte[readers.Length][];
-            this.startIndex = new int[readers.Length];
-            this.endIndex = new int[readers.Length];
-            this.Writer = writer;
+            this.buffer = new byte[BufferSize];
+            this.reader = reader;
+            this.startIndex = 0;
+            this.endIndex = 0;
+            this.Writers = [writer];
+        }
 
-            for (int i = 0; i < this.readers.Length; i++)
-            {
-                this.buffers[i] = new byte[BufferSize];
-                this.startIndex[i] = 0;
-                this.endIndex[i] = 0;
-            }
+        internal StreamCopyOperation(Stream reader, Stream[] writers)
+        {
+            this.buffer = new byte[BufferSize];
+            this.reader = reader;
+            this.startIndex = 0;
+            this.endIndex = 0;
+            this.Writers = writers;
         }
 
         internal async Task<int> CopyLineAsync()
         {
-            List<Task> tasks = [];
-            int allTotal = 0;
-            SemaphoreSlim allTotalLocker = new(1);
-            SemaphoreSlim writerLocker = new(1);
+            byte[] buffer = this.buffer;
+            var source = this.reader;
+            int startIndex = this.startIndex;
+            int endIndex = this.endIndex;
 
-            for (int i = 0; i < this.readers.Length; i++)
+            int total = 0;
+            while (true)
             {
-                int index = i;
-                tasks.Add(Task.Run(async () =>
+                if (startIndex == 0)
                 {
-                    byte[] buffer = this.buffers[index];
-                    var source = this.readers[index];
-                    int startIndex = this.startIndex[index];
-                    int endIndex = this.endIndex[index];
-                    var destination = this.Writer;
-
-                    int total = 0;
-                    while (true)
+                    if ((endIndex = await source.ReadAsync(buffer, 0, BufferSize)) == 0)
                     {
-                        if (startIndex == 0)
-                        {
-                            if ((endIndex = await source.ReadAsync(buffer, 0, BufferSize)) == 0)
-                            {
-                                break;
-                            }
-                        }
+                        break;
+                    }
+                }
 
-                        int buffered = endIndex - startIndex;
+                int buffered = endIndex - startIndex;
 
-                        int newLineIndex = Array.IndexOf(buffer, (byte)'\n', startIndex, buffered);
-                        if (newLineIndex >= 0)
-                        {
-                            int count = newLineIndex - startIndex + 1;
-                            total += count;
-                            try
-                            {
-                                await writerLocker.WaitAsync();
-                                destination.Write(buffer, startIndex, count);
-                                destination.Flush();
-                            }
-                            finally
-                            {
-                                writerLocker.Release();
-                            }
-
-                            startIndex = (newLineIndex + 1) % BufferSize;
-                            break;
-                        }
-
-                        total += buffered;
+                int newLineIndex = Array.IndexOf(buffer, (byte)'\n', startIndex, buffered);
+                if (newLineIndex >= 0)
+                {
+                    int count = newLineIndex - startIndex + 1;
+                    total += count;
+                    foreach (var destination in this.Writers)
+                    {
                         try
                         {
-                            await writerLocker.WaitAsync();
-                            destination.Write(buffer, startIndex, buffered);
+                            destination.Write(buffer, startIndex, count);
                             destination.Flush();
                         }
-                        finally
+                        catch
                         {
-                            writerLocker.Release();
                         }
-
-                        startIndex = 0;
                     }
 
-                    this.startIndex[index] = startIndex;
-                    this.endIndex[index] = endIndex;
+                    startIndex = (newLineIndex + 1) % BufferSize;
+                    break;
+                }
 
+                total += buffered;
+                foreach (var destination in this.Writers)
+                {
                     try
                     {
-                        await allTotalLocker.WaitAsync();
-                        allTotal += total;
+                        destination.Write(buffer, startIndex, buffered);
+                        destination.Flush();
                     }
-                    finally
+                    catch
                     {
-                        allTotalLocker.Release();
                     }
-                }));
+                }
+
+                startIndex = 0;
             }
 
-            await Task.WhenAll(tasks);
+            this.startIndex = startIndex;
+            this.endIndex = endIndex;
 
-            return allTotal;
+            return total;
         }
     }
 }
