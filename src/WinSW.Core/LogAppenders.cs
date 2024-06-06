@@ -711,34 +711,24 @@ namespace WinSW
     {
         private const int BufferSize = 1024;
         private readonly Stream[] readers;
-
-        private int[] startIndex;
-        private int[] endIndex;
+        private readonly byte[][] buffers;
+        private readonly int[] startIndex;
+        private readonly int[] endIndex;
 
         internal Stream Writer;
-
-        internal StreamCopyOperation(Stream reader, Stream writer)
-        {
-            this.readers = [reader];
-            this.startIndex = [0];
-            this.endIndex = [0];
-            this.Writer = writer;
-        }
 
         internal StreamCopyOperation(Stream[] readers, Stream writer)
         {
             this.readers = readers;
+            this.buffers = new byte[readers.Length][];
             this.startIndex = new int[readers.Length];
             this.endIndex = new int[readers.Length];
             this.Writer = writer;
 
-            for (int i = 0; i < this.startIndex.Length; i++)
+            for (int i = 0; i < this.readers.Length; i++)
             {
+                this.buffers[i] = new byte[BufferSize];
                 this.startIndex[i] = 0;
-            }
-
-            for (int i = 0; i < this.endIndex.Length; i++)
-            {
                 this.endIndex[i] = 0;
             }
         }
@@ -755,7 +745,7 @@ namespace WinSW
                 int index = i;
                 tasks.Add(Task.Run(async () =>
                 {
-                    byte[] buffer = new byte[BufferSize];
+                    byte[] buffer = this.buffers[index];
                     var source = this.readers[index];
                     int startIndex = this.startIndex[index];
                     int endIndex = this.endIndex[index];
