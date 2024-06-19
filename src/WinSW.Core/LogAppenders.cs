@@ -35,7 +35,7 @@ namespace WinSW
 
         private static bool IsDisabled(string? path) => string.IsNullOrEmpty(path) || path!.Equals("NUL", StringComparison.OrdinalIgnoreCase);
 
-        protected override Task LogOutput(Stream outputReader)
+        protected override Task Log(Stream outputReader, Stream errorReader)
         {
             List<Stream> streams = [];
 
@@ -43,18 +43,6 @@ namespace WinSW
             {
                 streams.Add(new FileStream(this.outputPath!, FileMode.OpenOrCreate));
             }
-
-            if (!this.CombinedFileDisabled)
-            {
-                streams.Add(new FileStream(this.combinedPath!, FileMode.OpenOrCreate));
-            }
-
-            return this.CopyStreamAsync(outputReader, [.. streams]);
-        }
-
-        protected override Task LogError(Stream errorReader)
-        {
-            List<Stream> streams = [];
 
             if (!this.ErrFileDisabled)
             {
@@ -66,7 +54,7 @@ namespace WinSW
                 streams.Add(new FileStream(this.combinedPath!, FileMode.OpenOrCreate));
             }
 
-            return this.CopyStreamAsync(errorReader, [.. streams]);
+            return this.CopyStreamAsync(outputReader, [.. streams]);
         }
     }
 
@@ -159,31 +147,16 @@ namespace WinSW
 
         public override void Log(StreamReader outputReader, StreamReader errorReader)
         {
-            this.SafeLogOutput(outputReader.BaseStream);
-            this.SafeLogError(errorReader.BaseStream);
+            this.SafeLog(outputReader.BaseStream, errorReader.BaseStream);
         }
 
-        protected abstract Task LogOutput(Stream outputReader);
+        protected abstract Task Log(Stream outputReader, Stream errorReader);
 
-        protected abstract Task LogError(Stream errorReader);
-
-        private async void SafeLogOutput(Stream outputReader)
+        private async void SafeLog(Stream outputReader, Stream errorReader)
         {
             try
             {
-                await this.LogOutput(outputReader);
-            }
-            catch (Exception e)
-            {
-                this.EventLogger.WriteEntry("Unhandled exception in task. " + e, EventLogEntryType.Error);
-            }
-        }
-
-        private async void SafeLogError(Stream errorReader)
-        {
-            try
-            {
-                await this.LogError(errorReader);
+                await this.Log(outputReader, errorReader);
             }
             catch (Exception e)
             {
@@ -211,7 +184,7 @@ namespace WinSW
             this.CombinedLogFileName = this.BaseLogFileName + this.CombinedFilePattern;
         }
 
-        protected override Task LogOutput(Stream outputReader)
+        protected override Task Log(Stream outputReader, Stream errorReader)
         {
             List<Stream> streams = [];
 
@@ -219,18 +192,6 @@ namespace WinSW
             {
                 streams.Add(new FileStream(this.OutputLogFileName, this.FileMode));
             }
-
-            if (!this.CombinedFileDisabled)
-            {
-                streams.Add(new FileStream(this.CombinedLogFileName, this.FileMode));
-            }
-
-            return this.CopyStreamAsync(outputReader, [.. streams]);
-        }
-
-        protected override Task LogError(Stream errorReader)
-        {
-            List<Stream> streams = [];
 
             if (!this.ErrFileDisabled)
             {
@@ -242,7 +203,7 @@ namespace WinSW
                 streams.Add(new FileStream(this.CombinedLogFileName, this.FileMode));
             }
 
-            return this.CopyStreamAsync(errorReader, [.. streams]);
+            return this.CopyStreamAsync(outputReader, [.. streams]);
         }
     }
 
@@ -290,7 +251,7 @@ namespace WinSW
             this.Period = period;
         }
 
-        protected override Task LogOutput(Stream outputReader)
+        protected override Task Log(Stream outputReader, Stream errorReader)
         {
             List<string> exts = [];
 
@@ -298,18 +259,6 @@ namespace WinSW
             {
                 exts.Add(this.OutFilePattern);
             }
-
-            if (!this.CombinedFileDisabled)
-            {
-                exts.Add(this.CombinedFilePattern);
-            }
-
-            return this.CopyStreamWithDateRotationAsync(outputReader, [.. exts]);
-        }
-
-        protected override Task LogError(Stream errorReader)
-        {
-            List<string> exts = [];
 
             if (!this.ErrFileDisabled)
             {
@@ -321,7 +270,7 @@ namespace WinSW
                 exts.Add(this.CombinedFilePattern);
             }
 
-            return this.CopyStreamWithDateRotationAsync(errorReader, [.. exts]);
+            return this.CopyStreamWithDateRotationAsync(outputReader, [.. exts]);
         }
 
         /// <summary>
@@ -396,7 +345,7 @@ namespace WinSW
         {
         }
 
-        protected override Task LogOutput(Stream outputReader)
+        protected override Task Log(Stream outputReader, Stream errorReader)
         {
             List<string> exts = [];
 
@@ -404,18 +353,6 @@ namespace WinSW
             {
                 exts.Add(this.OutFilePattern);
             }
-
-            if (!this.CombinedFileDisabled)
-            {
-                exts.Add(this.CombinedFilePattern);
-            }
-
-            return this.CopyStreamWithRotationAsync(outputReader, [.. exts]);
-        }
-
-        protected override Task LogError(Stream errorReader)
-        {
-            List<string> exts = [];
 
             if (!this.ErrFileDisabled)
             {
@@ -427,7 +364,7 @@ namespace WinSW
                 exts.Add(this.CombinedFilePattern);
             }
 
-            return this.CopyStreamWithRotationAsync(errorReader, [.. exts]);
+            return this.CopyStreamWithRotationAsync(outputReader, [.. exts]);
         }
 
         /// <summary>
@@ -575,13 +512,18 @@ namespace WinSW
             this.ZipDateFormat = zipdateformat;
         }
 
-        protected override Task LogOutput(Stream outputReader)
+        protected override Task Log(Stream outputReader, Stream errorReader)
         {
             List<string> exts = [];
 
             if (!this.OutFileDisabled)
             {
                 exts.Add(this.OutFilePattern);
+            }
+
+            if (!this.ErrFileDisabled)
+            {
+                exts.Add(this.ErrFilePattern);
             }
 
             if (!this.CombinedFileDisabled)
@@ -590,23 +532,6 @@ namespace WinSW
             }
 
             return this.CopyStreamWithRotationAsync(outputReader, [.. exts]);
-        }
-
-        protected override Task LogError(Stream errorReader)
-        {
-            List<string> exts = [];
-
-            if (!this.OutFileDisabled)
-            {
-                exts.Add(this.OutFilePattern);
-            }
-
-            if (!this.CombinedFileDisabled)
-            {
-                exts.Add(this.CombinedFilePattern);
-            }
-
-            return this.CopyStreamWithRotationAsync(errorReader, [.. exts]);
         }
 
         private async Task CopyStreamWithRotationAsync(Stream reader, string[] extensions)
