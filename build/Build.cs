@@ -68,6 +68,14 @@ class Build : BaseNukeBuildHelpers
                         .SetProject(proj)
                         .SetConfiguration("Release")
                         .EnableSelfContained()
+                        .SetFramework(runtime switch
+                        {
+                            "linux-x64" => "net8.0-linux",
+                            "linux-arm64" => "net8.0-linux",
+                            "windows-x64" => "net8.0-windows",
+                            "windows-arm64" => "net8.0-windows",
+                            _ => throw new NotImplementedException()
+                        })
                         .SetRuntime(runtime switch
                         {
                             "linux-x64" => "linux-x64",
