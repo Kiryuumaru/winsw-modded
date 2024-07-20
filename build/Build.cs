@@ -60,7 +60,7 @@ class Build : BaseNukeBuildHelpers
                     var outAsset = GetOutAsset(os, arch);
                     var archivePath = outAsset.Parent / outAsset.NameWithoutExtension;
                     var outPath = archivePath / outAsset.NameWithoutExtension;
-                    var proj = RootDirectory / "src" / "Presentation" / "Presentation.csproj";
+                    var proj = RootDirectory / "src" / "WinSW" / "WinSW.csproj";
                     DotNetTasks.DotNetBuild(_ => _
                         .SetProjectFile(proj)
                         .SetConfiguration("Release"));
